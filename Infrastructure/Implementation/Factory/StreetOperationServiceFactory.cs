@@ -1,37 +1,45 @@
 ﻿using Application.Interfaces.Service;
 using Domain.Entities;
 using Infrastructure.Implementation.Service;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NetTopologySuite.Geometries;
+using System.Threading.Tasks;
 
 namespace Infrastructure.Implementation.Factory
 {
     public class StreetOperationServiceFactory : IStreetOperationService
     {
         private readonly FeatureFlags _featureFlags;
-        private readonly IStreetOperationService _postGISService;
-        private readonly IStreetOperationService _algorithmicService;
+        private readonly IServiceProvider _serviceProvider;
 
         public StreetOperationServiceFactory(
             IOptions<FeatureFlags> featureFlags,
-            IStreetOperationService postGISService,
-            IStreetOperationService algorithmicService)
+            IServiceProvider serviceProvider)
         {
             _featureFlags = featureFlags.Value;
-            _postGISService = postGISService;
-            _algorithmicService = algorithmicService;
+            _serviceProvider = serviceProvider;
         }
 
-        public Task AddPointToStreetAsync(int streetId, Coordinate newPoint, bool addToEnd)
+        public async Task AddPointToStreetAsync(int streetId, Coordinate newPoint, bool addToEnd)
         {
+            IStreetOperationService service = null;
+
             if (_featureFlags.UsePostGIS)
             {
-                return _postGISService.AddPointToStreetAsync(streetId, newPoint, addToEnd);
+                service = _serviceProvider.GetService<PostGISStreetOperationService>();
             }
             else
             {
-                return _algorithmicService.AddPointToStreetAsync(streetId, newPoint, addToEnd);
+                service = _serviceProvider.GetService<AlgorithmicStreetOperationService>();
             }
+
+            if (service == null)
+            {
+                throw new InvalidOperationException("Required service for street operation not found.");
+            }
+
+            await service.AddPointToStreetAsync(streetId, newPoint, addToEnd);
         }
     }
 }

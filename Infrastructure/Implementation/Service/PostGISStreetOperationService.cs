@@ -15,10 +15,12 @@ namespace Infrastructure.Implementation.Service
     public class PostGISStreetOperationService : IStreetOperationService
     {
         private readonly StreetContext _dbContext;
+        private readonly IDatabaseExecutor _executor;
 
-        public PostGISStreetOperationService(StreetContext dbContext)
+        public PostGISStreetOperationService(StreetContext dbContext, IDatabaseExecutor executor)
         {
             _dbContext = dbContext;
+            _executor = executor;
         }
 
         public async Task AddPointToStreetAsync(int streetId, Coordinate newPoint, bool addToEnd)
@@ -36,7 +38,7 @@ namespace Infrastructure.Implementation.Service
                 SET ""Geometry"" = ST_AddPoint(""Geometry"", ST_SetSRID(ST_MakePoint(@x, @y), 4326), 0)
                 WHERE ""Id"" = @streetId";
 
-            await _dbContext.Database.ExecuteSqlRawAsync(query, new[]
+            await _executor.ExecuteSqlRawAsync(query, new[]
             {
             new NpgsqlParameter("@x", newPoint.X),
             new NpgsqlParameter("@y", newPoint.Y),

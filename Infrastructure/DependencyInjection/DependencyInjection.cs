@@ -12,9 +12,11 @@ namespace Infrastructure.DependencyInjection
         public static IServiceCollection AddInfrastructure(this IServiceCollection services)
         {
             services.AddScoped<IStreetRepository, StreetRepository>();
+            services.AddScoped<IDatabaseExecutor, DatabaseExecutor>();
 
             services.AddTransient<PostGISStreetOperationService>();
             services.AddTransient<AlgorithmicStreetOperationService>();
+
             services.AddTransient<IStreetOperationService, StreetOperationServiceFactory>();
 
             return services;

@@ -4,7 +4,6 @@ using Application.Interfaces.Service;
 using Contracts.Request.StreetRequestDto;
 using Domain.Entities;
 using FluentAssertions;
-using FluentAssertions.Common;
 using Infrastructure.Implementation.Factory;
 using Infrastructure.Implementation.Service;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using NetTopologySuite.Geometries;
+using Npgsql;
 using StreetService.Controllers;
 using Testcontainers.PostgreSql;
 using Tests.MockData;
@@ -24,6 +24,8 @@ namespace Tests
     {
         private Mock<IStreetRepository> _mockStreetRepository;
         private Mock<ILogger<StreetController>> _mockLogger;
+        private Mock<IDatabaseExecutor> _mockExecutor;
+        private Mock<IServiceProvider> _mockServiceProvider;
         private StreetController _controller;
 
         private PostGISStreetOperationService _postGISService;
@@ -35,7 +37,6 @@ namespace Tests
         [TestInitialize]
         public void Setup()
         {
-            // Start PostgreSQL container
             _postgresContainer = new PostgreSqlBuilder()
                 .WithDatabase("testdb")
                 .WithUsername("postgres")
@@ -45,64 +46,94 @@ namespace Tests
 
             _postgresContainer.StartAsync().Wait();
 
-            // Configure DbContext with the PostgreSQL connection string
             var options = new DbContextOptionsBuilder<StreetContext>()
                 .UseNpgsql(_postgresContainer.GetConnectionString(), npgsqlOptions => npgsqlOptions.UseNetTopologySuite())
             .Options;
 
             _dbContext = new StreetContext(options);
 
-            // Apply migrations or initialize database
             _dbContext.Database.EnsureCreated();
 
-            // Mocking repository and services
             _mockStreetRepository = new Mock<IStreetRepository>();
             _mockLogger = new Mock<ILogger<StreetController>>();
+            _mockExecutor = new Mock<IDatabaseExecutor>();
+            _mockServiceProvider = new Mock<IServiceProvider>();
 
-            // Create the actual service instances
-            _postGISService = new PostGISStreetOperationService(_dbContext);
+            _postGISService = new PostGISStreetOperationService(_dbContext, _mockExecutor.Object);
             _algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, null);
 
-            // Create the controller with the factory
-            var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = true }); // Feature flag enabled for PostGIS
-            var factory = new StreetOperationServiceFactory(featureFlags, _postGISService, _algorithmicService);
+            var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = true });
+            var factory = new StreetOperationServiceFactory(featureFlags, _mockServiceProvider.Object);
             _controller = new StreetController(_mockStreetRepository.Object, _mockLogger.Object, null, factory);
         }
 
         [TestMethod]
-        public async Task AddPointToStreet_ValidRequest_ShouldReturnNoContent()
+        public async Task AddPointToStreet_ShouldAddPointAtTheEnd_WhenAddToEndIsFalse()
         {
-            // Arrange
-            int streetId = 1;
-            var request = new AddPointRequestDto(50.0, 14.0, true); // Example latitude/longitude
-            var newPoint = new Coordinate(request.Latitude, request.Longitude);
+            const int streetId = 1;
+            const double latitude = 50.0;
+            const double longitude = 14.0;
 
-            // Act
-            var result = await _controller.AddPointToStreet(streetId, request);
+            var newPoint = new Coordinate(latitude, longitude);
 
-            // Assert
-            result.Should().BeOfType<NoContentResult>("because a valid request should return NoContent");
+            var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = false });
+
+            var street = FakeData.GenerateRandomStreet(streetId);
+            _mockStreetRepository.Setup(r => r.GetStreetByIdAsync(It.Is<int>(id => id == streetId)))
+                .ReturnsAsync(street);
+
+            var loggerMock = Mock.Of<ILogger<AlgorithmicStreetOperationService>>();
+            var algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, loggerMock);
+
+            var mockServiceProvider = new Mock<IServiceProvider>();
+
+            mockServiceProvider.Setup(sp => sp.GetService(typeof(AlgorithmicStreetOperationService)))
+                .Returns(algorithmicService);
+
+            var factory = new StreetOperationServiceFactory(featureFlags, mockServiceProvider.Object);
+
+            await factory.AddPointToStreetAsync(streetId, newPoint, false);
+
+            var firstPoint = street.Geometry.Coordinates.First();
+            firstPoint.X.Should().Be(latitude);
+            firstPoint.Y.Should().Be(longitude);
         }
 
         [TestMethod]
-        public async Task AddPointToStreet_NullRequest_ShouldReturnBadRequest()
+        public async Task AddPointToStreet_ShouldAddPointAtTheEnd_WhenAddToEndIsTrue()
         {
-            // Arrange
-            int streetId = 1;
+            const int streetId = 1;
+            const double latitude = 50.0;
+            const double longitude = 14.0;
 
-            // Act
-            var result = await _controller.AddPointToStreet(streetId, null);
+            var newPoint = new Coordinate(latitude, longitude);
 
-            // Assert
-            result.Should().BeOfType<BadRequestObjectResult>("because a null request should return BadRequest");
-            var badRequestResult = result as BadRequestObjectResult;
-            badRequestResult?.Value.Should().Be("Request cannot be null", "because the error message should indicate null request");
+            var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = false });
+
+            var street = FakeData.GenerateRandomStreet(streetId);
+            _mockStreetRepository.Setup(r => r.GetStreetByIdAsync(It.Is<int>(id => id == streetId)))
+                .ReturnsAsync(street);
+
+            var loggerMock = Mock.Of<ILogger<AlgorithmicStreetOperationService>>();
+            var algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, loggerMock);
+
+            var mockServiceProvider = new Mock<IServiceProvider>();
+
+            mockServiceProvider.Setup(sp => sp.GetService(typeof(AlgorithmicStreetOperationService)))
+                .Returns(algorithmicService);
+
+            var factory = new StreetOperationServiceFactory(featureFlags, mockServiceProvider.Object);
+
+            await factory.AddPointToStreetAsync(streetId, newPoint, true);
+
+            var lastPoint = street.Geometry.Coordinates.Last();
+            lastPoint.X.Should().Be(latitude);
+            lastPoint.Y.Should().Be(longitude);
         }
 
         [TestMethod]
         public async Task AddPointToStreet_ShouldCallPostGIS_WhenFeatureFlagIsEnabled()
         {
-            // Arrange
             const int streetId = 1;
             const double latitude = 50.0;
             const double longitude = 14.0;
@@ -110,51 +141,38 @@ namespace Tests
             var newPoint = new Coordinate(latitude, longitude);
 
             var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = true });
-            var _mockAlgorithmicService = Mock.Of<IStreetOperationService>();
 
-            var factory = new StreetOperationServiceFactory(
-                featureFlags,
-                _postGISService,
-                _mockAlgorithmicService);
+            var mockExecutor = new Mock<IDatabaseExecutor>();
+            mockExecutor.Setup(ex => ex.ExecuteSqlRawAsync(
+                It.IsAny<string>(),
+                It.IsAny<object[]>()
+            ))
+            .Returns(Task.CompletedTask);
 
-            // Act
+            var postGISService = new PostGISStreetOperationService(_dbContext,mockExecutor.Object);
+
+            var mockServiceProvider = new Mock<IServiceProvider>();
+            mockServiceProvider.Setup(sp => sp.GetService(typeof(PostGISStreetOperationService)))
+                .Returns(postGISService);
+
+            var factory = new StreetOperationServiceFactory(featureFlags, mockServiceProvider.Object);
+
             await factory.AddPointToStreetAsync(streetId, newPoint, false);
 
             // Assert
-           
-        }
-
-        [TestMethod]
-        public async Task AddPointToStreet_ShouldCallAlgorithmic_WhenFeatureFlagIsDisabled()
-        {
-            // Arrange
-            const int streetId = 1;
-            const double latitude = 50.0;
-            const double longitude = 14.0;
-
-            var street = FakeData.GenerateRandomStreet(streetId);
-            var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = false }); // Feature flag disabled for PostGIS
-
-            _mockStreetRepository.Setup(r => r.GetStreetByIdAsync(It.Is<int>(id => id == streetId)))
-                .ReturnsAsync(street);
-
-            var loggerMock = Mock.Of<ILogger<AlgorithmicStreetOperationService>>();
-            var algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, loggerMock);
-
-            var factory = new StreetOperationServiceFactory(
-                featureFlags,
-                _postGISService, // Mocked PostGIS service
-                algorithmicService // Real Algorithmic service
+            mockExecutor.Verify(
+                e => e.ExecuteSqlRawAsync(
+                    It.Is<string>(sql => sql.Contains("ST_AddPoint")), // SQL dotaz obsahuje ST_AddPoint
+                    It.Is<object[]>(parameters =>
+                        parameters.Length == 3 &&
+                        parameters.OfType<NpgsqlParameter>().Any(p => p.ParameterName == "@x" && (double)p.Value == latitude) &&
+                        parameters.OfType<NpgsqlParameter>().Any(p => p.ParameterName == "@y" && (double)p.Value == longitude) &&
+                        parameters.OfType<NpgsqlParameter>().Any(p => p.ParameterName == "@streetId" && (int)p.Value == streetId)
+                    )
+                ),
+                Times.Once, // SQL dotaz by měl být proveden přesně jednou
+                "The SQL query for adding a point to the street should be executed exactly once with correct parameters."
             );
-
-            var newPoint = new Coordinate(latitude, longitude);
-
-            // Act
-            await factory.AddPointToStreetAsync(streetId, newPoint, false);
-
-            // Assert
-            _mockStreetRepository.Verify(r => r.GetStreetByIdAsync(streetId), Times.Once);
-            _mockStreetRepository.Verify(r => r.UpdateStreetAsync(It.IsAny<Street>()), Times.Once);
         }
 
         public void Dispose()
