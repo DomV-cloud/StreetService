@@ -9,10 +9,10 @@ namespace Infrastructure.Implementation.Service
     public class AlgorithmicStreetOperationService : IStreetOperationService
     {
         private readonly IStreetRepository _repository;
-        private readonly ILogger<StreetRepository> _logger;
+        private readonly ILogger<AlgorithmicStreetOperationService> _logger;
         private readonly Object _lock = new();
 
-        public AlgorithmicStreetOperationService(IStreetRepository repository, ILogger<StreetRepository> logger)
+        public AlgorithmicStreetOperationService(IStreetRepository repository, ILogger<AlgorithmicStreetOperationService> logger)
         {
             _repository = repository;
             _logger = logger;
@@ -24,7 +24,6 @@ namespace Infrastructure.Implementation.Service
 
             lock (_lock)
             {
-
                 if (retrievedStreet is null)
                 {
                     _logger.LogError("Street with ID {StreetId} was not found.", streetId);

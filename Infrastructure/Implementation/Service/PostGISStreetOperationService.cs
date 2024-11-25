@@ -3,6 +3,7 @@ using Application.Interfaces.Service;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using NetTopologySuite.Geometries;
+using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,19 +23,24 @@ namespace Infrastructure.Implementation.Service
 
         public async Task AddPointToStreetAsync(int streetId, Coordinate newPoint, bool addToEnd)
         {
+            if (streetId <= 0 || newPoint is null)
+            {
+                return;
+            }
+
             string query = addToEnd
-            ? @"UPDATE streets
-                SET geometry = ST_AddPoint(geometry, ST_SetSRID(ST_MakePoint(@x, @y), 4326))
-                WHERE id = @streetId"
-            : @"UPDATE streets
-                SET geometry = ST_AddPoint(geometry, ST_SetSRID(ST_MakePoint(@x, @y), 4326), 0)
-                WHERE id = @streetId";
+            ? @"UPDATE public.""Streets""
+                SET ""Geometry"" = ST_AddPoint(""Geometry"", ST_SetSRID(ST_MakePoint(@x, @y), 4326))
+                WHERE ""Id"" = @streetId"
+            : @"UPDATE public.""Streets""
+                SET ""Geometry"" = ST_AddPoint(""Geometry"", ST_SetSRID(ST_MakePoint(@x, @y), 4326), 0)
+                WHERE ""Id"" = @streetId";
 
             await _dbContext.Database.ExecuteSqlRawAsync(query, new[]
             {
-            new SqlParameter("@x", newPoint.X),
-            new SqlParameter("@y", newPoint.Y),
-            new SqlParameter("@streetId", streetId)
+            new NpgsqlParameter("@x", newPoint.X),
+            new NpgsqlParameter("@y", newPoint.Y),
+            new NpgsqlParameter("@streetId", streetId)
             });
         }
     }

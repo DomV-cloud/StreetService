@@ -1,4 +1,5 @@
 ﻿using Application.Interfaces.Repository;
+using Application.Interfaces.Service;
 using AutoMapper;
 using Azure.Core;
 using Contracts.Request.StreetRequestDto;
@@ -17,12 +18,14 @@ namespace StreetService.Controllers
         private readonly IStreetRepository _streetRepository;
         private readonly ILogger<StreetController> _logger;
         private readonly IMapper _mapper;
+        private readonly IStreetOperationService _streetOperationService;
 
-        public StreetController(IStreetRepository streetRepository, ILogger<StreetController> logger, IMapper mapper)
+        public StreetController(IStreetRepository streetRepository, ILogger<StreetController> logger, IMapper mapper, IStreetOperationService streetOperationService)
         {
-            _streetRepository = streetRepository ?? throw new ArgumentNullException(nameof(streetRepository));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
+            _streetRepository = streetRepository;
+            _logger = logger;
+            _mapper = mapper;
+            _streetOperationService = streetOperationService;
         }
 
         [HttpPost("create")]
@@ -62,13 +65,12 @@ namespace StreetService.Controllers
         {
             if (request is null)
             {
-                _logger.LogWarning("Invalid model state for AddPointToStreet: {@Request}", request);
-                return BadRequest("Point request is null");
+                return BadRequest("Request cannot be null");
             }
 
             var newPoint = new Coordinate(request.Latitude, request.Longitude);
 
-            await _streetRepository.AddPointToStreetAsync(streetId, newPoint, request.AddToEnd);
+            await _streetOperationService.AddPointToStreetAsync(streetId, newPoint, request.AddToEnd);
             _logger.LogInformation("Point added to street with ID {StreetId}.", streetId);
 
             return NoContent();

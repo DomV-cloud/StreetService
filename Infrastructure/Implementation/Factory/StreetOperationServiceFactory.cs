@@ -14,8 +14,8 @@ namespace Infrastructure.Implementation.Factory
 
         public StreetOperationServiceFactory(
             IOptions<FeatureFlags> featureFlags,
-            PostGISStreetOperationService postGISService,
-            AlgorithmicStreetOperationService algorithmicService)
+            IStreetOperationService postGISService,
+            IStreetOperationService algorithmicService)
         {
             _featureFlags = featureFlags.Value;
             _postGISService = postGISService;
