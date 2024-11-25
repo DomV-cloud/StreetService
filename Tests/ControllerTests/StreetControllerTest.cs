@@ -34,8 +34,27 @@ namespace Tests
 
         private PostgreSqlContainer _postgresContainer;
 
+        private int streetId = FakeData.GenerateRandomId();
+
         [TestInitialize]
         public void Setup()
+        {
+            AddTestContainerSetup();
+
+            _mockStreetRepository = new Mock<IStreetRepository>();
+            _mockLogger = new Mock<ILogger<StreetController>>();
+            _mockExecutor = new Mock<IDatabaseExecutor>();
+            _mockServiceProvider = new Mock<IServiceProvider>();
+
+            _postGISService = new PostGISStreetOperationService(_dbContext, _mockExecutor.Object);
+            _algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, null);
+
+            var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = true });
+            var factory = new StreetOperationServiceFactory(featureFlags, _mockServiceProvider.Object);
+            _controller = new StreetController(_mockStreetRepository.Object, _mockLogger.Object, null, factory);
+        }
+
+        public void AddTestContainerSetup()
         {
             _postgresContainer = new PostgreSqlBuilder()
                 .WithDatabase("testdb")
@@ -53,18 +72,6 @@ namespace Tests
             _dbContext = new StreetContext(options);
 
             _dbContext.Database.EnsureCreated();
-
-            _mockStreetRepository = new Mock<IStreetRepository>();
-            _mockLogger = new Mock<ILogger<StreetController>>();
-            _mockExecutor = new Mock<IDatabaseExecutor>();
-            _mockServiceProvider = new Mock<IServiceProvider>();
-
-            _postGISService = new PostGISStreetOperationService(_dbContext, _mockExecutor.Object);
-            _algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, null);
-
-            var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = true });
-            var factory = new StreetOperationServiceFactory(featureFlags, _mockServiceProvider.Object);
-            _controller = new StreetController(_mockStreetRepository.Object, _mockLogger.Object, null, factory);
         }
 
         [TestMethod]
@@ -149,7 +156,7 @@ namespace Tests
             ))
             .Returns(Task.CompletedTask);
 
-            var postGISService = new PostGISStreetOperationService(_dbContext,mockExecutor.Object);
+            var postGISService = new PostGISStreetOperationService(_dbContext, mockExecutor.Object);
 
             var mockServiceProvider = new Mock<IServiceProvider>();
             mockServiceProvider.Setup(sp => sp.GetService(typeof(PostGISStreetOperationService)))
