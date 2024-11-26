@@ -1,12 +1,10 @@
 ﻿using Application.DatabaseContext;
 using Application.Interfaces.Repository;
 using Application.Interfaces.Service;
-using Contracts.Request.StreetRequestDto;
 using Domain.Entities;
 using FluentAssertions;
 using Infrastructure.Implementation.Factory;
 using Infrastructure.Implementation.Service;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -77,11 +75,7 @@ namespace Tests
         [TestMethod]
         public async Task AddPointToStreet_ShouldAddPointAtTheEnd_WhenAddToEndIsFalse()
         {
-            const int streetId = 1;
-            const double latitude = 50.0;
-            const double longitude = 14.0;
-
-            var newPoint = new Coordinate(latitude, longitude);
+            var newPoint = FakeData.GenerateRandomCoordinate();
 
             var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = false });
 
@@ -89,31 +83,24 @@ namespace Tests
             _mockStreetRepository.Setup(r => r.GetStreetByIdAsync(It.Is<int>(id => id == streetId)))
                 .ReturnsAsync(street);
 
-            var loggerMock = Mock.Of<ILogger<AlgorithmicStreetOperationService>>();
-            var algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, loggerMock);
+            var algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, null);
 
-            var mockServiceProvider = new Mock<IServiceProvider>();
-
-            mockServiceProvider.Setup(sp => sp.GetService(typeof(AlgorithmicStreetOperationService)))
+            _mockServiceProvider.Setup(sp => sp.GetService(typeof(AlgorithmicStreetOperationService)))
                 .Returns(algorithmicService);
 
-            var factory = new StreetOperationServiceFactory(featureFlags, mockServiceProvider.Object);
+            var factory = new StreetOperationServiceFactory(featureFlags, _mockServiceProvider.Object);
 
             await factory.AddPointToStreetAsync(streetId, newPoint, false);
 
             var firstPoint = street.Geometry.Coordinates.First();
-            firstPoint.X.Should().Be(latitude);
-            firstPoint.Y.Should().Be(longitude);
+            firstPoint.X.Should().Be(newPoint.X);
+            firstPoint.Y.Should().Be(newPoint.Y);
         }
 
         [TestMethod]
         public async Task AddPointToStreet_ShouldAddPointAtTheEnd_WhenAddToEndIsTrue()
         {
-            const int streetId = 1;
-            const double latitude = 50.0;
-            const double longitude = 14.0;
-
-            var newPoint = new Coordinate(latitude, longitude);
+            var newPoint = FakeData.GenerateRandomCoordinate();
 
             var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = false });
 
@@ -121,31 +108,24 @@ namespace Tests
             _mockStreetRepository.Setup(r => r.GetStreetByIdAsync(It.Is<int>(id => id == streetId)))
                 .ReturnsAsync(street);
 
-            var loggerMock = Mock.Of<ILogger<AlgorithmicStreetOperationService>>();
-            var algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, loggerMock);
+            var algorithmicService = new AlgorithmicStreetOperationService(_mockStreetRepository.Object, null);
 
-            var mockServiceProvider = new Mock<IServiceProvider>();
-
-            mockServiceProvider.Setup(sp => sp.GetService(typeof(AlgorithmicStreetOperationService)))
+            _mockServiceProvider.Setup(sp => sp.GetService(typeof(AlgorithmicStreetOperationService)))
                 .Returns(algorithmicService);
 
-            var factory = new StreetOperationServiceFactory(featureFlags, mockServiceProvider.Object);
+            var factory = new StreetOperationServiceFactory(featureFlags, _mockServiceProvider.Object);
 
             await factory.AddPointToStreetAsync(streetId, newPoint, true);
 
             var lastPoint = street.Geometry.Coordinates.Last();
-            lastPoint.X.Should().Be(latitude);
-            lastPoint.Y.Should().Be(longitude);
+            lastPoint.X.Should().Be(newPoint.X);
+            lastPoint.Y.Should().Be(newPoint.Y);
         }
 
         [TestMethod]
         public async Task AddPointToStreet_ShouldCallPostGIS_WhenFeatureFlagIsEnabled()
         {
-            const int streetId = 1;
-            const double latitude = 50.0;
-            const double longitude = 14.0;
-
-            var newPoint = new Coordinate(latitude, longitude);
+            var newPoint = FakeData.GenerateRandomCoordinate();
 
             var featureFlags = Options.Create(new FeatureFlags { UsePostGIS = true });
 
@@ -172,14 +152,52 @@ namespace Tests
                     It.Is<string>(sql => sql.Contains("ST_AddPoint")), // SQL dotaz obsahuje ST_AddPoint
                     It.Is<object[]>(parameters =>
                         parameters.Length == 3 &&
-                        parameters.OfType<NpgsqlParameter>().Any(p => p.ParameterName == "@x" && (double)p.Value == latitude) &&
-                        parameters.OfType<NpgsqlParameter>().Any(p => p.ParameterName == "@y" && (double)p.Value == longitude) &&
+                        parameters.OfType<NpgsqlParameter>().Any(p => p.ParameterName == "@x" && (double)p.Value == newPoint.X) &&
+                        parameters.OfType<NpgsqlParameter>().Any(p => p.ParameterName == "@y" && (double)p.Value == newPoint.Y) &&
                         parameters.OfType<NpgsqlParameter>().Any(p => p.ParameterName == "@streetId" && (int)p.Value == streetId)
                     )
                 ),
                 Times.Once, // SQL dotaz by měl být proveden přesně jednou
                 "The SQL query for adding a point to the street should be executed exactly once with correct parameters."
             );
+        }
+
+        [TestMethod]
+        public async Task AddPointToStreet_ShouldHandleRaceConditions()
+        {
+            // Arrange
+            var street = FakeData.GenerateRandomStreet(streetId);
+
+            int beforeRaceCondition = street.Geometry.Coordinates.Length;
+
+            var newPoint1 = FakeData.GenerateRandomCoordinate();
+            var newPoint2 = FakeData.GenerateRandomCoordinate();
+
+            var mockRepository = new Mock<IStreetRepository>();
+            mockRepository.Setup(r => r.GetStreetByIdAsync(It.Is<int>(id => id == streetId)))
+                .ReturnsAsync(() => street);
+
+            mockRepository.Setup(r => r.UpdateStreetAsync(It.Is<Street>(s => s.Id == street.Id)))
+                .Returns(Task.CompletedTask);
+
+            var service = new AlgorithmicStreetOperationService(mockRepository.Object, null);
+
+            // Act
+            var task1 = Task.Run(() => service.AddPointToStreetAsync(streetId, newPoint1, addToEnd: true));
+            var task2 = Task.Run(() => service.AddPointToStreetAsync(streetId, newPoint2, addToEnd: true));
+
+            await Task.WhenAll(task1, task2);
+
+            // Assert
+            mockRepository.Verify(r => r.GetStreetByIdAsync(It.Is<int>(id => id == streetId)), Times.Exactly(2));
+            mockRepository.Verify(r => r.UpdateStreetAsync(It.Is<Street>(s => s.Id == street.Id)), Times.Exactly(2));
+
+            street.Geometry.Coordinates
+                .Should()
+                .Contain(newPoint1, "the geometry should contain the first new point")
+                .And.Contain(newPoint2, "the geometry should contain the second new point");
+
+            street.Geometry.Coordinates.Length.Should().Be(beforeRaceCondition + 2);
         }
 
         public void Dispose()
