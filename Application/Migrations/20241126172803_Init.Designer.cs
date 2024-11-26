@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Application.Migrations
 {
     [DbContext(typeof(StreetContext))]
-    [Migration("20241122130018_Init")]
+    [Migration("20241126172803_Init")]
     partial class Init
     {
         /// <inheritdoc />
@@ -49,6 +49,29 @@ namespace Application.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Streets");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Capacity = 150,
+                            Geometry = (NetTopologySuite.Geometries.LineString)new NetTopologySuite.IO.WKTReader().Read("SRID=0;LINESTRING (-122.333056 47.609722, -122.123889 47.669444)"),
+                            Name = "Example 1"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Capacity = 300,
+                            Geometry = (NetTopologySuite.Geometries.LineString)new NetTopologySuite.IO.WKTReader().Read("SRID=0;LINESTRING (-122.431297 37.773972, 48.7801 9.1815)"),
+                            Name = "Example 2"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Capacity = 250,
+                            Geometry = (NetTopologySuite.Geometries.LineString)new NetTopologySuite.IO.WKTReader().Read("SRID=0;LINESTRING (85.6522352 25.983223, 80.2321312 25.563213)"),
+                            Name = "Example 3"
+                        });
                 });
 #pragma warning restore 612, 618
         }
