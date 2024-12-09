@@ -20,7 +20,7 @@ namespace Infrastructure.Implementation.Factory
             _featureFlags = featureFlags.Value;
             _serviceProvider = serviceProvider;
         }
-
+        // TODO: Refactor method, should return Interface
         public async Task AddPointToStreetAsync(int streetId, Coordinate newPoint, bool addToEnd)
         {
             IStreetOperationService service = null;
